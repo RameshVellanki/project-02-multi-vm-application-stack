@@ -3,6 +3,21 @@ output "web_server_name" {
   value       = google_compute_instance.web_server.name
 }
 
+output "project_id" {
+  description = "GCP Project ID"
+  value       = var.project_id
+}
+
+output "region" {
+  description = "GCP Region"
+  value       = var.region
+}
+
+output "zone" {
+  description = "GCP Zone"
+  value       = var.zone
+}
+
 output "web_server_ip" {
   description = "External IP address of the web server"
   value       = google_compute_instance.web_server.network_interface[0].access_config[0].nat_ip

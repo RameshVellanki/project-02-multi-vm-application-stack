@@ -127,6 +127,8 @@ jobs:
           sleep 180
 
       - name: Run Comprehensive Deployment Tests
+        id: deployment_tests
+        continue-on-error: true
         run: |
           chmod +x ./tests/verify_deployment.sh
           WEB_IP=$(terraform -chdir=./terraform output -raw web_server_external_ip 2>/dev/null || echo "")
@@ -139,7 +141,55 @@ jobs:
           echo "Running deployment verification tests..."
           ./tests/verify_deployment.sh "$WEB_IP"
 
+      - name: Collect Diagnostics on Failure
+        if: steps.deployment_tests.outcome == 'failure'
+        run: |
+          echo "=========================================="
+          echo "Collecting diagnostic information..."
+          echo "=========================================="
+          
+          PROJECT_ID=$(terraform -chdir=./terraform output -raw project_id 2>/dev/null || echo "")
+          
+          if [ -z "$PROJECT_ID" ]; then
+            echo "Could not determine project ID"
+            exit 0
+          fi
+          
+          echo "Checking DB server serial console output..."
+          gcloud compute instances get-serial-port-output db-server \
+            --zone=us-central1-a \
+            --project="$PROJECT_ID" \
+            --start=-20000 2>&1 | tail -100 || echo "Could not get serial output"
+          
+          echo ""
+          echo "Checking Web server serial console output..."
+          gcloud compute instances get-serial-port-output web-server \
+            --zone=us-central1-a \
+            --project="$PROJECT_ID" \
+            --start=-20000 2>&1 | tail -100 || echo "Could not get serial output"
+          
+          echo ""
+          echo "Checking VM instances status..."
+          gcloud compute instances list --project="$PROJECT_ID" --filter="zone:us-central1-a"
+          
+          echo ""
+          echo "Testing database port from GitHub runner..."
+          WEB_IP=$(terraform -chdir=./terraform output -raw web_server_external_ip 2>/dev/null)
+          if [ -n "$WEB_IP" ]; then
+            echo "Attempting to connect to web server..."
+            curl -v "http://$WEB_IP/api/health" 2>&1 | head -30 || true
+            echo ""
+            curl -v "http://$WEB_IP/api/db-status" 2>&1 || true
+          fi
+
+      - name: Fail Workflow if Tests Failed
+        if: steps.deployment_tests.outcome == 'failure'
+        run: |
+          echo "❌ Deployment tests failed. See diagnostics above."
+          exit 1
+
       - name: Create Deployment Summary
+        if: steps.deployment_tests.outcome == 'success'
         run: |
           cat >> $GITHUB_STEP_SUMMARY << EOF
           ## 🚀 Multi-VM Deployment Successful

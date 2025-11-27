@@ -207,5 +207,9 @@ else
     log "⚠️  WARNING: Database connectivity test failed"
 fi
 
+# Create completion marker
+touch /var/log/db-startup-complete.marker
+log "Startup completion marker created"
+
 log "Database tier startup completed successfully"
 exit 0

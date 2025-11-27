@@ -557,7 +557,12 @@ log "Application status: $(systemctl is-active webapp)"
 log "Nginx status: $(systemctl is-active nginx)"
 log "Application port: $APP_PORT"
 log "Database connection: $DB_HOST:$DB_PORT/$DB_NAME"
+log "Database reachable: $(timeout 2 bash -c "cat < /dev/null > /dev/tcp/$DB_HOST/$DB_PORT" && echo 'YES' || echo 'NO')"
 log "==============================================="
+
+# Create completion marker
+touch /var/log/web-startup-complete.marker
+log "Startup completion marker created"
 
 log "Web tier startup completed successfully"
 exit 0
