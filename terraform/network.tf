@@ -12,6 +12,8 @@ resource "google_compute_firewall" "web_tier_http" {
   target_tags   = ["web-tier"]
 
   description = "Allow HTTP traffic to web tier from internet"
+
+  depends_on = [google_project_service.compute]
 }
 
 # Firewall Rule: Allow PostgreSQL traffic from web tier to database tier
@@ -28,6 +30,8 @@ resource "google_compute_firewall" "db_tier_postgres" {
   target_tags = ["db-tier"]
 
   description = "Allow PostgreSQL traffic from web tier to database tier"
+
+  depends_on = [google_project_service.compute]
 }
 
 # Firewall Rule: Allow internal communication between tiers
@@ -48,6 +52,8 @@ resource "google_compute_firewall" "internal_communication" {
   allow {
     protocol = "icmp"
   }
+
+  depends_on = [google_project_service.compute]
 
   source_tags = ["web-tier", "db-tier"]
   target_tags = ["web-tier", "db-tier"]

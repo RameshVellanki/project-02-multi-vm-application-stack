@@ -3,6 +3,8 @@ resource "google_service_account" "web_tier_sa" {
   account_id   = "${var.web_vm_name}-sa"
   display_name = "Service Account for Web Tier"
   description  = "Custom service account for web tier VM with minimal permissions"
+
+  depends_on = [google_project_service.iam]
 }
 
 # IAM: Web Tier Logging
@@ -24,6 +26,8 @@ resource "google_service_account" "db_tier_sa" {
   account_id   = "${var.db_vm_name}-sa"
   display_name = "Service Account for Database Tier"
   description  = "Custom service account for database tier VM with minimal permissions"
+
+  depends_on = [google_project_service.iam]
 }
 
 # IAM: Database Tier Logging
@@ -48,6 +52,8 @@ resource "google_compute_instance" "db_server" {
 
   tags   = ["db-tier"]
   labels = var.labels
+
+  depends_on = [google_project_service.compute]
 
   boot_disk {
     initialize_params {
@@ -99,6 +105,8 @@ resource "google_compute_instance" "web_server" {
 
   tags   = ["web-tier", "http-server"]
   labels = var.labels
+
+  depends_on = [google_project_service.compute]
 
   boot_disk {
     initialize_params {
