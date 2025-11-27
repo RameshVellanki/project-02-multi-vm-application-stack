@@ -117,14 +117,49 @@ jobs:
 
       - name: Wait for Services to Initialize
         run: |
-          echo "⏳ Waiting for services to start..."
+          echo "⏳ Waiting for VMs to boot and services to start..."
+          echo "  - VM boot time: ~60-90 seconds"
           echo "  - PostgreSQL installation and configuration: ~60-90 seconds"
           echo "  - Node.js installation and npm packages: ~60-90 seconds"
           echo "  - Application startup and database connectivity: ~30 seconds"
-          echo "Total estimated time: 3-5 minutes"
+          echo "Total estimated time: 5-7 minutes"
           echo ""
-          echo "Waiting 3 minutes before starting tests..."
-          sleep 180
+          
+          PROJECT_ID=$(terraform -chdir=./terraform output -raw project_id)
+          WEB_IP=$(terraform -chdir=./terraform output -raw web_server_external_ip)
+          
+          echo "Project: $PROJECT_ID"
+          echo "Web IP: $WEB_IP"
+          echo ""
+          
+          # Wait 4 minutes initially
+          echo "Initial wait: 4 minutes..."
+          sleep 240
+          
+          # Then check if web server is reachable (retry for up to 3 more minutes)
+          echo "Checking if web server is reachable..."
+          MAX_RETRIES=18
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "http://$WEB_IP" >/dev/null 2>&1; then
+              echo "✅ Web server is reachable!"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "Attempt $RETRY_COUNT/$MAX_RETRIES - Web server not yet reachable..."
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                sleep 10
+              fi
+            fi
+          done
+          
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "⚠️  Warning: Web server not reachable after 7 minutes. Will proceed with tests anyway."
+          fi
+          
+          echo "Waiting additional 30 seconds for services to stabilize..."
+          sleep 30
 
       - name: Run Comprehensive Deployment Tests
         id: deployment_tests
