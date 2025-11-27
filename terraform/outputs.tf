@@ -78,6 +78,16 @@ output "ssh_db_command" {
   value       = "gcloud compute ssh ${google_compute_instance.db_server.name} --zone=${var.zone} --project=${var.project_id}"
 }
 
+output "nat_gateway_name" {
+  description = "Name of the Cloud NAT gateway"
+  value       = google_compute_router_nat.nat_gateway.name
+}
+
+output "nat_router_name" {
+  description = "Name of the Cloud Router for NAT"
+  value       = google_compute_router.nat_router.name
+}
+
 output "test_commands" {
   description = "Commands to test the application"
   value = <<-EOT

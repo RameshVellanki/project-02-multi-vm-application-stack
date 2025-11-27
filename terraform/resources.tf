@@ -92,7 +92,8 @@ resource "google_compute_instance" "db_server" {
     google_project_service.compute,
     google_service_account.db_tier_sa,
     google_project_iam_member.db_tier_logging,
-    google_project_iam_member.db_tier_monitoring
+    google_project_iam_member.db_tier_monitoring,
+    google_compute_router_nat.nat_gateway  # Ensure NAT is ready for package downloads
   ]
 }
 
