@@ -35,7 +35,33 @@ apt-get install -y postgresql-15 postgresql-contrib-15
 
 # Wait for PostgreSQL to start
 log "Waiting for PostgreSQL to start..."
-sleep 5
+MAX_WAIT=30
+COUNT=0
+while [ $COUNT -lt $MAX_WAIT ]; do
+    if systemctl is-active --quiet postgresql; then
+        log "✅ PostgreSQL is active"
+        break
+    fi
+    COUNT=$((COUNT + 1))
+    sleep 1
+done
+
+if ! systemctl is-active --quiet postgresql; then
+    log "❌ PostgreSQL failed to start in ${MAX_WAIT} seconds"
+    exit 1
+fi
+
+# Wait for PostgreSQL to be ready to accept connections
+log "Waiting for PostgreSQL to accept connections..."
+COUNT=0
+while [ $COUNT -lt $MAX_WAIT ]; do
+    if sudo -u postgres psql -c "SELECT 1" > /dev/null 2>&1; then
+        log "✅ PostgreSQL is accepting connections"
+        break
+    fi
+    COUNT=$((COUNT + 1))
+    sleep 1
+done
 
 # Configure PostgreSQL to listen on all interfaces
 log "Configuring PostgreSQL network settings..."
@@ -169,7 +195,17 @@ log "Database name: $DB_NAME"
 log "Database user: $DB_USER"
 log "Service status: $(systemctl is-active postgresql)"
 log "Listening on: $(grep listen_addresses /etc/postgresql/15/main/postgresql.conf | grep -v '#')"
+log "Active connections: $(ss -tuln | grep :5432 || echo 'Port 5432 not yet bound')"
+log "Test connection: $(sudo -u postgres psql -c 'SELECT version();' 2>&1 | head -1)"
 log "==============================================="
+
+# Final connectivity test
+log "Performing final connectivity test..."
+if sudo -u postgres psql -d $DB_NAME -c "SELECT COUNT(*) FROM users;" > /dev/null 2>&1; then
+    log "✅ Database is fully operational and accepting queries"
+else
+    log "⚠️  WARNING: Database connectivity test failed"
+fi
 
 log "Database tier startup completed successfully"
 exit 0

@@ -54,6 +54,19 @@ check_endpoint() {
                 echo "Response: $body" | jq '.' 2>/dev/null || echo "$body"
                 return 0
             fi
+        else
+            # Also try without -f flag to see what status code we get
+            response=$(curl -s -w "\n%{http_code}" "$url" 2>/dev/null)
+            http_code=$(echo "$response" | tail -n 1)
+            body=$(echo "$response" | sed '$d')
+            
+            # 503 Service Unavailable might mean app is running but DB not ready
+            if [ "$http_code" = "503" ]; then
+                echo "   Received 503 - Service starting (database may not be ready yet)"
+                if echo "$body" | grep -q '"connected":false' 2>/dev/null; then
+                    echo "   Database connection issue detected, will retry..."
+                fi
+            fi
         fi
         
         retry_count=$((retry_count + 1))

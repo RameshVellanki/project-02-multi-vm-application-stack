@@ -78,7 +78,7 @@ const port = process.env.APP_PORT || 3000;
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Database configuration
+// Database configuration with better connection handling
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: process.env.DB_PORT || 5432,
@@ -87,30 +87,68 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000,  // Increased from 2s to 10s
+  ssl: false,
+  // Retry connection configuration
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000
 });
 
-// Test database connection
-pool.on('connect', () => {
-  console.log('Connected to PostgreSQL database');
+// Database connection status
+let dbConnected = false;
+
+// Test database connection with retry logic
+const testDatabaseConnection = async (retries = 10, delay = 5000) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      console.log(`Attempting database connection (attempt ${i + 1}/${retries})...`);
+      const client = await pool.connect();
+      await client.query('SELECT 1');
+      client.release();
+      console.log('✅ Successfully connected to PostgreSQL database');
+      dbConnected = true;
+      return true;
+    } catch (err) {
+      console.error(`❌ Database connection attempt ${i + 1} failed:`, err.message);
+      if (i < retries - 1) {
+        console.log(`Retrying in ${delay / 1000} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  console.error('Failed to connect to database after all retries');
+  dbConnected = false;
+  return false;
+};
+
+// Connection event handlers
+pool.on('connect', (client) => {
+  console.log('New database connection established');
+  dbConnected = true;
 });
 
-pool.on('error', (err) => {
-  console.error('Database connection error:', err);
+pool.on('error', (err, client) => {
+  console.error('Unexpected database error:', err);
+  dbConnected = false;
 });
 
-// Health check endpoint
+pool.on('remove', (client) => {
+  console.log('Database connection removed from pool');
+});
+
+// Health check endpoint (always available)
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     tier: 'web',
     nodejs: process.version,
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    database: dbConnected ? 'connected' : 'disconnected'
   });
 });
 
-// Database status endpoint
+// Database status endpoint with better error handling
 app.get('/api/db-status', async (req, res) => {
   try {
     const result = await pool.query('SELECT COUNT(*) as count FROM users');
@@ -118,14 +156,19 @@ app.get('/api/db-status', async (req, res) => {
       connected: true,
       database: process.env.DB_NAME,
       host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
       tables: ['users'],
       recordCount: parseInt(result.rows[0].count)
     });
   } catch (err) {
     console.error('Database error:', err);
-    res.status(500).json({
+    res.status(503).json({
       connected: false,
-      error: err.message
+      error: err.message,
+      code: err.code,
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      database: process.env.DB_NAME
     });
   }
 });
@@ -335,15 +378,50 @@ app.use((req, res) => {
   });
 });
 
-// Start server
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Web application listening on port ${port}`);
-  console.log(`Database: ${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`);
-});
+// Start server function
+const startServer = async () => {
+  try {
+    // Test database connection before starting server
+    console.log('Testing database connection before starting server...');
+    await testDatabaseConnection(10, 5000);
+    
+    // Start Express server
+    app.listen(port, '0.0.0.0', () => {
+      console.log('===============================================');
+      console.log(`✅ Web application listening on port ${port}`);
+      console.log(`Database: ${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`);
+      console.log(`Database Status: ${dbConnected ? 'Connected' : 'Disconnected (will retry)'}`);
+      console.log('===============================================');
+    });
+    
+    // Continue trying to connect to database even if initial attempts fail
+    if (!dbConnected) {
+      console.log('Server started but database not connected. Will continue retrying in background...');
+      setInterval(async () => {
+        if (!dbConnected) {
+          console.log('Background database reconnection attempt...');
+          await testDatabaseConnection(1, 1000);
+        }
+      }, 30000); // Retry every 30 seconds
+    }
+  } catch (err) {
+    console.error('Error starting server:', err);
+    process.exit(1);
+  }
+};
+
+// Start the application
+startServer();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, closing server...');
+  pool.end();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, closing server...');
   pool.end();
   process.exit(0);
 });
@@ -364,12 +442,37 @@ APP_PORT=$APP_PORT
 NODE_ENV=production
 EOF
 
+# Test database connectivity before starting application
+log "Testing database connectivity..."
+MAX_DB_WAIT=120  # Wait up to 2 minutes for database
+DB_WAIT_COUNT=0
+DB_AVAILABLE=false
+
+while [ $DB_WAIT_COUNT -lt $MAX_DB_WAIT ]; do
+    if timeout 5 bash -c "cat < /dev/null > /dev/tcp/$DB_HOST/$DB_PORT" 2>/dev/null; then
+        log "✅ Database is reachable at $DB_HOST:$DB_PORT"
+        DB_AVAILABLE=true
+        break
+    else
+        DB_WAIT_COUNT=$((DB_WAIT_COUNT + 5))
+        log "Waiting for database... ($DB_WAIT_COUNT/$MAX_DB_WAIT seconds)"
+        sleep 5
+    fi
+done
+
+if [ "$DB_AVAILABLE" = false ]; then
+    log "⚠️  WARNING: Database not reachable after ${MAX_DB_WAIT}s. Starting app anyway (will retry connection)."
+else
+    log "Database connectivity verified!"
+fi
+
 # Create systemd service for Node.js app
 log "Creating systemd service for application..."
 cat > /etc/systemd/system/webapp.service <<EOF
 [Unit]
 Description=Multi-VM Web Application
 After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
