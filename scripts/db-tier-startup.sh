@@ -48,6 +48,15 @@ log "Database configuration: DB=$DB_NAME, USER=$DB_USER"
 log "Updating package lists..."
 apt-get update
 
+# Add PostgreSQL APT repository for PostgreSQL 15
+log "Adding PostgreSQL APT repository..."
+apt-get install -y wget ca-certificates
+wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+echo "deb http://apt.postgresql.org/pub/repos/apt/ jammy-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+
+log "Updating package lists with PostgreSQL repository..."
+apt-get update
+
 # Install PostgreSQL 15
 log "Installing PostgreSQL 15..."
 apt-get install -y postgresql-15 postgresql-contrib-15
